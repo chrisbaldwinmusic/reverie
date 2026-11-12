@@ -9,11 +9,13 @@ using APVTS = juce::AudioProcessorValueTreeState;
 
 namespace col
 {
-    const juce::Colour faceplate { 0xff17181b }, panel { 0xff232529 }, panelEdge { 0xff0c0d0e }, panelHi { 0xff34373d };
-    const juce::Colour well { 0xff0d0e0f }, wellEdge { 0xff3a3d43 }, ledOff { 0xff2c2e33 };
-    const juce::Colour cream { 0xffe9dfc6 }, creamDim { 0xffa39d8d };
-    const juce::Colour gold { 0xffc9a25a }, red { 0xffc0503f }, blue { 0xff4f86b8 }, green { 0xff62a070 };
-    const juce::Colour orange { 0xffd9853b }, purple { 0xff8672b8 }, ivory { 0xffcfc7b2 }, teal { 0xff4fa3a0 };
+    // Midnight blue: navy metalwork, pearl lettering, champagne for the things you press.
+    const juce::Colour faceplate { 0xff0e141f }, panel { 0xff1b2536 }, panelEdge { 0xff070a11 }, panelHi { 0xff34435e };
+    const juce::Colour well { 0xff080c14 }, wellEdge { 0xff33425c }, ledOff { 0xff232e42 };
+    const juce::Colour cream { 0xffe6e9ef }, creamDim { 0xff929cb2 };
+    const juce::Colour gold { 0xffcfb276 }, red { 0xffc9606a }, blue { 0xff5aa2e0 }, green { 0xff5fae94 };
+    const juce::Colour orange { 0xffdc9a52 }, purple { 0xff8d80cf }, ivory { 0xffc3ccdc }, teal { 0xff52aab4 };
+    const juce::Colour control { 0xff0c111b }, popup { 0xff151d2b }, ink { 0xff0b1019 };      // button and menu backgrounds, text on lit buttons
 }
 
 inline juce::Font font (float size, bool bold = false, float tracking = 0.0f)
@@ -61,14 +63,15 @@ class ReverieLookAndFeel final : public juce::LookAndFeel_V4
 public:
     ReverieLookAndFeel()
     {
-        setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff131416));
+        setColour (juce::ComboBox::backgroundColourId, col::control);
         setColour (juce::ComboBox::textColourId, col::cream);
         setColour (juce::ComboBox::outlineColourId, col::wellEdge);
         setColour (juce::ComboBox::arrowColourId, col::creamDim);
-        setColour (juce::PopupMenu::backgroundColourId, juce::Colour (0xff1c1d20));
+        setColour (juce::PopupMenu::backgroundColourId, col::popup);
         setColour (juce::PopupMenu::textColourId, col::cream);
         setColour (juce::PopupMenu::highlightedBackgroundColourId, col::gold);
-        setColour (juce::PopupMenu::highlightedTextColourId, juce::Colours::black);
+        setColour (juce::PopupMenu::highlightedTextColourId, col::ink);
+        setColour (juce::PopupMenu::headerTextColourId, col::creamDim);
     }
 
     void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos,
@@ -92,8 +95,8 @@ public:
         g.fillEllipse (centre.x - radius, centre.y - radius + 3.0f, radius * 2.0f, radius * 2.0f);
 
         auto skirt = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a4d54), centre.x, skirt.getY(),
-                                                 juce::Colour (0xff101113), centre.x, skirt.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff46536b), centre.x, skirt.getY(),
+                                                 juce::Colour (0xff0a0e17), centre.x, skirt.getBottom(), false));
         g.fillEllipse (skirt);
         g.setColour (juce::Colours::black.withAlpha (0.8f));
         g.drawEllipse (skirt, 1.0f);
@@ -107,7 +110,7 @@ public:
 
         juce::Path pointer;
         pointer.addRoundedRectangle (-1.5f, -radius * 0.98f, 3.0f, radius * 0.62f, 1.5f);
-        g.setColour (juce::Colour (0xfff6f0de));
+        g.setColour (juce::Colour (0xfff4f6fa));
         g.fillPath (pointer, juce::AffineTransform::rotation (startAngle + pos * (endAngle - startAngle)).translated (centre));
     }
 
@@ -216,11 +219,11 @@ public:
             return;
         }
 
-        g.setColour (lit ? accent : juce::Colour (0xff131416).brighter (over ? 0.08f : 0.0f));
+        g.setColour (lit ? accent : col::control.brighter (over ? 0.08f : 0.0f));
         g.fillRoundedRectangle (r, 3.0f);
         g.setColour (lit ? accent.brighter (0.4f) : col::wellEdge);
         g.drawRoundedRectangle (r, 3.0f, 1.0f);
-        g.setColour (lit ? juce::Colour (0xff141414) : col::creamDim);
+        g.setColour (lit ? col::ink : col::creamDim);
         g.setFont (font (10.5f, true, 0.06f));
         g.drawText (getName(), getLocalBounds(), juce::Justification::centred, false);
     }
@@ -244,11 +247,11 @@ public:
     {
         const bool lit = getToggleState();
         auto r = getLocalBounds().toFloat().reduced (1.0f);
-        g.setColour (lit ? accent : juce::Colour (0xff131416).brighter (over ? 0.08f : 0.0f));
+        g.setColour (lit ? accent : col::control.brighter (over ? 0.08f : 0.0f));
         g.fillRoundedRectangle (r, 3.0f);
         g.setColour (lit ? accent.brighter (0.4f) : col::wellEdge);
         g.drawRoundedRectangle (r, 3.0f, 1.0f);
-        g.setColour (lit ? juce::Colour (0xff141414) : col::creamDim);
+        g.setColour (lit ? col::ink : col::creamDim);
         g.setFont (font (10.5f, true, 0.06f));
         g.drawText (getName(), getLocalBounds(), juce::Justification::centred, false);
     }
@@ -458,7 +461,7 @@ public:
                 g.setGradientFill (juce::ColourGradient (accent.brighter (0.25f), 0.0f, b.getY(), accent.darker (0.25f), 0.0f, b.getBottom(), false));
                 g.fillRoundedRectangle (b, 3.5f);
             }
-            g.setColour (lit ? juce::Colour (0xff15130f) : col::creamDim);
+            g.setColour (lit ? col::ink : col::creamDim);
             g.setFont (font (13.0f, true, 0.18f));
             g.drawText (names[i].toUpperCase(), b, juce::Justification::centred, false);
         }
@@ -542,8 +545,8 @@ private:
 
     void paintVu (juce::Graphics& g, juce::Rectangle<float> face)
     {
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff3e9cb), face.getCentreX(), face.getBottom(),
-                                                 juce::Colour (0xffc9b98c), face.getX(), face.getY(), true));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffeef1f4), face.getCentreX(), face.getBottom(),
+                                                 juce::Colour (0xffb4c0d2), face.getX(), face.getY(), true));
         g.fillRoundedRectangle (face, 5.0f);
 
         juce::Graphics::ScopedSaveState save (g);
@@ -553,7 +556,7 @@ private:
         const float R = face.getHeight() * 1.08f;
         const float sweep = juce::degreesToRadians (44.0f);
         auto angleFor = [sweep] (float vu) { return -sweep + 2.0f * sweep * vuFraction (vu); };
-        const juce::Colour ink (0xff2a2520), redInk (0xffb5352a);
+        const juce::Colour ink (0xff1c2536), redInk (0xffb5352a);
 
         juce::Path arc, redArc;
         arc.addCentredArc (pivot.x, pivot.y, R, R, 0.0f, angleFor (-20.0f), angleFor (0.0f), true);
@@ -582,7 +585,7 @@ private:
         const float a = angleFor (showGr ? -grDb : vuDb);
         g.setColour (juce::Colours::black.withAlpha (0.18f));
         g.drawLine ({ pivot.translated (2.0f, 3.0f), pivot.getPointOnCircumference (R + 4.0f, a).translated (2.0f, 3.0f) }, 2.0f);
-        g.setColour (juce::Colour (0xff151210));
+        g.setColour (juce::Colour (0xff0d131e));
         g.drawLine ({ pivot, pivot.getPointOnCircumference (R + 4.0f, a) }, 1.6f);
 
         g.setColour (juce::Colours::black.withAlpha (0.35f));

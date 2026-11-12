@@ -62,6 +62,7 @@ private:
     void savePreset();
     void loadPreset (const juce::File&);
     void resetToInit();
+    void tapTempo();
 
     Knob* knob (Section&, const char* paramId, const char* caption);
     void combo (Section&, const char* paramId, const char* caption, int width = 96);
@@ -88,6 +89,8 @@ private:
     reverie::ui::TextToggle guideButton { "GUIDE", reverie::ui::col::gold }, timelineButton { "TIMELINE", reverie::ui::col::gold };
     reverie::ui::TextToggle aButton { "A", reverie::ui::col::ivory }, bButton { "B", reverie::ui::col::ivory };
     reverie::ui::TextToggle undoButton { "UNDO", reverie::ui::col::ivory }, redoButton { "REDO", reverie::ui::col::ivory };
+    reverie::ui::TextToggle tapButton { "TAP", reverie::ui::col::ivory };
+    juce::Array<double> taps;       // times of the recent tap-tempo clicks, in milliseconds
     juce::ComboBox presetBox;
     juce::Array<juce::File> presetFiles;
     std::unique_ptr<juce::FileChooser> chooser;

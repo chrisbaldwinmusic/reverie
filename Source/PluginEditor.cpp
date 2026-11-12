@@ -6,6 +6,7 @@ using namespace reverie::ui;
 namespace
 {
     constexpr int headerH = 74, rowH = 300, guideH = 200, margin = 10, gap = 8, meterW = 262;
+    constexpr int sourceId = 200, effectId = 400, userId = 1000;     // preset menu item ids
 
     float toDb (float gain)     { return gain > 1.0e-5f ? 20.0f * std::log10 (gain) : -100.0f; }
 }
@@ -35,6 +36,10 @@ ReverieEditor::ReverieEditor (ReverieProcessor& p)
     tempoKnob = knob (input, "bpm", "TEMPO");
     knob (input, "feedLo", "FEED LOW CUT");
     knob (input, "feedHi", "FEED HIGH CUT");
+    tapButton.setClickingTogglesState (false);
+    tapButton.onClick = [this] { tapTempo(); };
+    setHelpId (tapButton, "tap");
+    input.addHeader (&tapButton, 40);
 
     // ---- DELAY ----  (top row: the echo itself; bottom row: its character and tone)
     delay.setPower (apvts, "dlyOn");
@@ -187,9 +192,18 @@ void ReverieEditor::refreshPresets()
 
     presetBox.clear (juce::dontSendNotification);
     presetBox.addItem ("Init (reset everything)", 1);
-    if (! presetFiles.isEmpty()) presetBox.addSeparator();
+
+    // factory presets: the Guide's starting points, then the other jobs the unit can do
+    presetBox.addSectionHeading ("Sources");
+    for (int i = 0; i < (int) guide::sources.size(); ++i)
+        presetBox.addItem (guide::sources[(size_t) i].name, sourceId + i);
+    presetBox.addSectionHeading ("Effects");
+    for (int i = 0; i < (int) guide::effects.size(); ++i)
+        presetBox.addItem (guide::effects[(size_t) i].name, effectId + i);
+
+    if (! presetFiles.isEmpty()) presetBox.addSectionHeading ("Yours");
     for (int i = 0; i < presetFiles.size(); ++i)
-        presetBox.addItem (presetFiles[i].getFileNameWithoutExtension(), 100 + i);
+        presetBox.addItem (presetFiles[i].getFileNameWithoutExtension(), userId + i);
     presetBox.addSeparator();
     presetBox.addItem ("Save preset...", 2);
     presetBox.addItem ("Show presets folder", 3);
@@ -200,10 +214,17 @@ void ReverieEditor::presetChosen()
     const int id = presetBox.getSelectedId();
     if (id == 0) return;
 
-    if (id >= 100)
+    if (id >= userId)
     {
-        loadPreset (presetFiles[id - 100]);
+        loadPreset (presetFiles[id - userId]);
         return;     // leave the preset's name showing
+    }
+    if (id >= sourceId)
+    {
+        // like the Guide's button: Mix, Wet Only, the gains and the tempo are left as they are
+        proc.undo.beginNewTransaction ("Preset");
+        applyStartingPoint (proc, id >= effectId ? guide::effects[(size_t) (id - effectId)] : guide::sources[(size_t) (id - sourceId)]);
+        return;
     }
 
     presetBox.setSelectedId (0, juce::dontSendNotification);
@@ -222,6 +243,24 @@ void ReverieEditor::resetToInit()
             p->setValueNotifyingHost (p->getDefaultValue());
             p->endChangeGesture();
         }
+}
+
+/** Sets the Tempo control from the average gap between the last few clicks. */
+void ReverieEditor::tapTempo()
+{
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (! taps.isEmpty() && now - taps.getLast() > 2000.0) taps.clear();
+    taps.add (now);
+    while (taps.size() > 6) taps.remove (0);
+    if (taps.size() < 2) return;
+
+    const double bpm = 60000.0 * (double) (taps.size() - 1) / (taps.getLast() - taps.getFirst());
+    if (auto* p = apvts.getParameter ("bpm"))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) juce::jlimit (40.0, 240.0, bpm)));
+        p->endChangeGesture();
+    }
 }
 
 void ReverieEditor::savePreset()
@@ -245,7 +284,7 @@ void ReverieEditor::savePreset()
             xml->writeTo (file);
 
         refreshPresets();
-        presetBox.setSelectedId (100 + presetFiles.indexOf (file), juce::dontSendNotification);
+        presetBox.setSelectedId (userId + presetFiles.indexOf (file), juce::dontSendNotification);
     });
 }
 
@@ -395,7 +434,7 @@ void ReverieEditor::paint (juce::Graphics& g)   { g.fillAll (col::faceplate); }
 void ReverieEditor::Content::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff222327), 0.0f, 0.0f, juce::Colour (0xff111214), 0.0f, r.getBottom(), false));
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1a2435), 0.0f, 0.0f, juce::Colour (0xff0a0f18), 0.0f, r.getBottom(), false));
     g.fillAll();
 
     g.setColour (juce::Colours::white.withAlpha (0.012f));
@@ -416,7 +455,7 @@ void ReverieEditor::Content::paint (juce::Graphics& g)
 
     for (auto p : { juce::Point<float> (7.0f, 7.0f), { r.getRight() - 7.0f, 7.0f }, { 7.0f, r.getBottom() - 7.0f }, { r.getRight() - 7.0f, r.getBottom() - 7.0f } })
     {
-        g.setColour (juce::Colour (0xff3d4046));
+        g.setColour (juce::Colour (0xff3a4860));
         g.fillEllipse (p.x - 3.5f, p.y - 3.5f, 7.0f, 7.0f);
         g.setColour (juce::Colours::black.withAlpha (0.7f));
         g.drawLine (p.x - 2.2f, p.y - 2.2f, p.x + 2.2f, p.y + 2.2f, 1.0f);
@@ -464,6 +503,7 @@ void ReverieEditor::timerCallback()
 
     const float hostBpm = m.hostBpm.load (std::memory_order_relaxed);
     tempoKnob->setAlpha (hostBpm > 1.0f ? 0.35f : 1.0f);        // the host's tempo wins when there is one
+    tapButton.setAlpha (hostBpm > 1.0f ? 0.35f : 1.0f);
 
     if (const int type = (int) raw ("rvType"); type != reverbType)
     {

@@ -598,7 +598,9 @@ int main (int argc, char** argv)
     if (want ("Guide starting points"))
     {
         bool ok = true;
-        for (auto& src : reverie::guide::sources)
+        std::vector<reverie::guide::Source> all (reverie::guide::sources);
+        all.insert (all.end(), reverie::guide::effects.begin(), reverie::guide::effects.end());
+        for (auto& src : all)
         {
             ReverieProcessor p;
             prepare (p);
@@ -607,15 +609,21 @@ int main (int argc, char** argv)
             reverie::ui::applyStartingPoint (p, src);
             auto b = noise (2, (int) sr * 6, -14.0f, 61, (int) sr * 2);
             run (p, b, 512);
-            const float out = rmsDb (b, 0, (int) sr * 2), tail = rmsDb (b, (int) (sr * 2.05), (int) (sr * 2.5));
+            // the short window catches chorus-length delays, which are over within a few milliseconds
+            const float out = rmsDb (b, 0, (int) sr * 2);
+            const float tail = std::max (rmsDb (b, (int) sr * 2 + 24, (int) sr * 2 + 960), rmsDb (b, (int) (sr * 2.05), (int) (sr * 2.5)));
             std::cout << "  " << juce::String (src.name).paddedRight (' ', 18) << " level " << juce::String (out, 1) << " dB, effects just after the sound stops "
                       << juce::String (tail, 1) << " dB" << std::endl;
-            if (! allFinite (b) || tail < -70.0f || tail > out) ok = false;
+            if (! allFinite (b) || tail < -70.0f || tail > out)
+            {
+                ok = false;
+                check (false, juce::String (src.name) + ": effects should be audible after the sound stops, and quieter than it");
+            }
         }
         for (auto* param : ReverieProcessor().getParameters())
             if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (param))
                 if (reverie::guide::findHelp (r->paramID.toRawUTF8()) == nullptr) { ok = false; check (false, "no Guide entry for " + r->paramID); }
-        check (ok, "every starting point applies, makes an audible effect quieter than the source, and every control has a Guide entry");
+        check (ok, "every starting point and factory preset applies, makes an audible effect quieter than the source, and every control has a Guide entry");
     }
 
     if (want ("State round-trip"))
