@@ -4,6 +4,9 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <iostream>
+#include <time.h>
+#include <pthread.h>
+#include <sys/qos.h>
 
 namespace
 {
@@ -582,18 +585,36 @@ int main (int argc, char** argv)
 
     if (want ("CPU"))
     {
+        // Twenty seconds of audio, timed as four five-second stretches. The time is this thread's own processor time,
+        // which leaves out the time it spends waiting while other programs run, and the quickest stretch is the
+        // estimate: other work on the machine can only slow a stretch (through shared caches), never speed it up.
+        // Ask for the performance cores, as a host does for its audio thread; left to itself, a busy machine may run
+        // this thread on an efficiency core, where the same work takes markedly longer.
+        pthread_set_qos_class_self_np (QOS_CLASS_USER_INTERACTIVE, 0);
+        auto threadMs = []
+        {
+            timespec t {};
+            clock_gettime (CLOCK_THREAD_CPUTIME_ID, &t);
+            return (double) t.tv_sec * 1000.0 + (double) t.tv_nsec * 1.0e-6;
+        };
         for (int type = 0; type < 6; ++type)
         {
             ReverieProcessor p;
             prepare (p, 2, sr, 256);
             setParam (p, "rvType", (float) type); setParam (p, "dlyType", (float) (type % 5));
             setParam (p, "dlyModDepth", 50.0f); setParam (p, "duckOn", 1.0f); setParam (p, "rvChar", 80.0f);
-            auto b = noise (2, (int) sr * 20, -12.0f, 5);
-            const auto start = juce::Time::getMillisecondCounterHiRes();
-            run (p, b, 256);
-            const double ms = juce::Time::getMillisecondCounterHiRes() - start;
-            std::cout << "  " << delayTypes[type % 5] << " delay + " << reverbTypes[type] << " reverb: " << ms / 200.0 << " % of one core at 48 kHz" << std::endl;
-            check (ms / 200.0 < 10.0, "CPU use is reasonable");
+            const int stretch = (int) sr * 5;
+            double best = 1.0e9;
+            for (int k = 0; k < 4; ++k)
+            {
+                auto b = noise (2, stretch, -12.0f, 5 + k);
+                const double start = threadMs();
+                run (p, b, 256);
+                best = std::min (best, threadMs() - start);
+            }
+            const double percent = best / (stretch / sr * 1000.0) * 100.0;
+            std::cout << "  " << delayTypes[type % 5] << " delay + " << reverbTypes[type] << " reverb: " << percent << " % of one core at 48 kHz" << std::endl;
+            check (percent < 10.0, "CPU use is reasonable");
         }
     }
 

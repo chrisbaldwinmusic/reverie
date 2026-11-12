@@ -6,6 +6,17 @@
 
 namespace reverie
 {
+/** The chips fitted to a BucketBrigade. Reverie's Analog delay uses the default: two MN3005s behind an NE570
+    compander, as in the long-delay pedals. Tourbillon (the sibling modulation plugin) fits one 1024-stage chip
+    without a compander for its chorus and vibrato, as the classic chorus pedals do. Keep the two copies of this
+    file the same apart from the namespace. */
+struct BbdChip
+{
+    int buckets = 4096;                         // 8192 stages: two MN3005s; one sample leaves per clock cycle
+    double clockMin = 10000.0, clockMax = 100000.0;
+    bool compander = true;
+};
+
 //==============================================================================
 /** One channel of a bucket-brigade delay, modelled as the circuit of a classic analog delay pedal:
 
@@ -30,11 +41,14 @@ namespace reverie
     pumping and breathing heard on the real pedals. */
 struct BucketBrigade
 {
-    static constexpr int buckets = 4096;            // 8192 stages: two MN3005s; one sample leaves per clock cycle
-    static constexpr double clockMin = 10000.0, clockMax = 100000.0;
+    using Chip = BbdChip;
 
-    void prepare (double sampleRate, double maxDelaySeconds)
+    void prepare (double sampleRate, double maxDelaySeconds, Chip chipToUse = {})
     {
+        chip = chipToUse;
+        buckets = chip.buckets;
+        clockMin = chip.clockMin;
+        clockMax = chip.clockMax;
         sr = sampleRate;
         T = 1.0 / sr;
         int n = 16;
@@ -68,7 +82,7 @@ struct BucketBrigade
         polesReady = true;
 
         drive = 1.0f + 2.0f * c;
-        noiseLevel = dbToGain (-84.0f + 12.0f * c);
+        noiseLevel = dbToGain ((chip.compander ? -84.0f : -96.0f) + 12.0f * c);
 
         // Charge-transfer loss: each stage passes on (1 - e) of its charge and the rest follows a
         // clock later. Over the whole chain that is close to exp (-N e (1 - cos w)) at the stage rate,
@@ -79,7 +93,8 @@ struct BucketBrigade
         smear = (float) (2.0 * buckets * inefficiency / 8.0);
 
         // both filters are fourth-order Butterworth low-pass at the same corner, as in most pedals
-        const double fc = 7000.0 - 4500.0 * c;
+        // (chorus pedals run a little brighter: their clock never drops as low as a long echo's)
+        const double fc = chip.compander ? 7000.0 - 4500.0 * c : 9500.0 - 5000.0 * c;
         const double wc = 2.0 * kPi * fc;
         std::complex<double> all[4];
         for (int k = 0; k < 4; ++k)
@@ -171,8 +186,11 @@ struct BucketBrigade
         double y = outDc * held;
         for (int m = 0; m < 2; ++m) y += (res[m] / pole[m] * xout[m]).real();
 
-        // expander: gain follows the level it receives, undoing the compressor
         const float yo = (float) y;
+        if (! chip.compander)
+            return rail * std::tanh (yo * (1.0f / rail));
+
+        // expander: gain follows the level it receives, undoing the compressor
         expEnv += compCoef * (std::abs (yo) - expEnv);
         const float expanded = yo * std::max (expEnv, envFloor) * (1.0f / refLevel);
         return rail * std::tanh (expanded * (1.0f / rail));     // the op-amp after the expander runs out of supply
@@ -182,8 +200,12 @@ struct BucketBrigade
     void write (float x) noexcept
     {
         // compressor: the gain cell sits in the op-amp's feedback, so the gain follows the output level
-        const float y = x * refLevel / std::max (compEnv, envFloor);
-        compEnv += compCoef * (std::abs (y) - compEnv);
+        float y = x;
+        if (chip.compander)
+        {
+            y = x * refLevel / std::max (compEnv, envFloor);
+            compEnv += compCoef * (std::abs (y) - compEnv);
+        }
         for (int m = 0; m < 2; ++m) xin[m] = decay[m] * xin[m] + (double) y;
     }
 
@@ -201,6 +223,10 @@ private:
 
     // 0 dB on the compander (its unity-gain level) sits at -12 dBFS
     static constexpr float refLevel = 0.25f, envFloor = 0.25f / 31.6f, rail = 2.0f;
+
+    Chip chip;
+    int buckets = 4096;
+    double clockMin = 10000.0, clockMax = 100000.0;
 
     double sr = 48000.0, T = 1.0 / 48000.0;
     std::vector<float> line;

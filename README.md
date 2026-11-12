@@ -36,4 +36,6 @@ After installing, quit your DAW, run `killall -9 AudioComponentRegistrar`, and r
 
 `Tests/Main.cpp` runs audio through the processor offline and checks bypass nulling, echo timing against milliseconds and tempo, the stereo modes, that every delay type stays bounded at 110 % feedback, that each reverb type decays in the time set, freeze, pre-delay, ducking and sidechain keying, routing, the bucket-brigade model (timing, compander level, bandwidth, hiss, sample-rate changes), loading states from older and newer versions, click-free switching, the Guide's starting points and CPU use, then renders screenshots of the interface.
 
+`Tests/spice/check_bbd.py` checks the Analog delay's bucket-brigade model against the same circuit solved by [ngspice](https://ngspice.sourceforge.io): the anti-aliasing and reconstruction filters, the clock ticks between host samples, the hold and its images, aliasing at slow clocks, and the NE570 compander. The model matches the circuit to within 55 dB or better. It takes about a minute and a half and isn't part of `build.sh`; run it with `python3 Tests/spice/check_bbd.py` after changing `BucketBrigade.h`.
+
 Built on [JUCE](https://juce.com), which has its own licence terms (AGPLv3 or commercial).
