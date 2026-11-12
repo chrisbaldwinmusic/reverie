@@ -1,0 +1,38 @@
+# Reverie
+
+A boutique delay and reverb plugin: one unit that covers slapback to shimmer. AU, VST3 and Standalone, built with JUCE. A sibling of Atelier, the channel strip, and built the same way.
+
+Two effects, three ways to connect them:
+
+- **Delay into Reverb** — every echo lands in the same space as the dry sound.
+- **Parallel** — echoes stay dry and distinct, the reverb stays clean.
+- **Reverb into Delay** — the whole tail is repeated, for swells and washes.
+
+## What's in it
+
+- **Delay** — five characters that differ in how each repeat is coloured on its way round the feedback loop: Digital, Tape (wow, flutter, saturation, head bump), Analog (bucket-brigade darkness and grit), Lo-Fi (sample-rate and bit reduction) and Reverse. Stereo, Ping-Pong and Cross modes, tempo sync with dotted and triplet values, L/R offset, modulation, filters in the loop, and feedback past 100 % held by a loop limiter.
+- **Reverb** — six types on an eight-line feedback delay network: Room, Chamber, Hall, Plate, Spring (with a dispersive chirp stage) and Shimmer (octave-up feedback). Pre-delay, size, decay as a true RT60, damping, diffusion, modulation, width, and a Freeze that holds the tail without it fading.
+- **Ducker** — turns the effects down while the source plays and lets them bloom in the gaps. Can target the delay, the reverb or both, and can be keyed from the sidechain input.
+- **Feed filters** — low and high cut on what is sent into the effects; the dry signal is never filtered.
+- **Timeline** — a picture of what the settings will do: each echo with its level and side, and the reverb tail, against time or beats.
+- **Guide** — explains whichever control is under the pointer, gives tips and a starting point per source and style, and comments live on what the effects are doing.
+- **Workflow** — click-free switching of everything, zero latency, Wet Only for use on sends, A/B, undo/redo, presets.
+
+## Building (macOS)
+
+Needs the Xcode Command Line Tools, plus CMake and Ninja:
+
+```sh
+pip3 install --user cmake ninja
+./build.sh
+```
+
+`build.sh` finds or fetches JUCE, runs the offline test suite, and installs the AU and VST3 into `~/Library/Audio/Plug-Ins`. Use `./build.sh --no-install` to build and test without installing. The build directory is `~/Library/Caches/Reverie-build`.
+
+After installing, quit your DAW, run `killall -9 AudioComponentRegistrar`, and reopen it. The plugin appears under the manufacturer "Channel Audio".
+
+## Tests
+
+`Tests/Main.cpp` runs audio through the processor offline and checks bypass nulling, echo timing against milliseconds and tempo, the stereo modes, that every delay type stays bounded at 110 % feedback, that each reverb type decays in the time set, freeze, pre-delay, ducking and sidechain keying, routing, click-free switching, the Guide's starting points and CPU use, then renders screenshots of the interface.
+
+Built on [JUCE](https://juce.com), which has its own licence terms (AGPLv3 or commercial).
