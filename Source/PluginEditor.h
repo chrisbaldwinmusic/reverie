@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "UI/Controls.h"
 #include "UI/Guide.h"
 #include "UI/Timeline.h"
 #include "UI/Widgets.h"
@@ -33,18 +34,19 @@ private:
         juce::String flowText;
     };
 
-    /** The delay's Time control: milliseconds when free-running, a note length when synced. */
+    /** The delay's Time control: a large knob in milliseconds when free-running, a grid of note lengths when synced. */
     struct TimeCell final : juce::Component
     {
         TimeCell (reverie::ui::APVTS& s, juce::Colour accent)
-            : free (s, "dlyTime", "TIME", accent), synced (s, "dlyDiv", "TIME", accent)
+            : free (s, "dlyTime", "TIME", accent), synced (s, accent)
         {
             addChildComponent (free);
             addChildComponent (synced);
         }
         void setSynced (bool on)    { free.setVisible (! on); synced.setVisible (on); }
-        void resized() override     { free.setBounds (getLocalBounds()); synced.setBounds (getLocalBounds()); }
-        Knob free, synced;
+        void resized() override     { free.setBounds (getLocalBounds()); synced.setBounds (getLocalBounds().reduced (4, 0)); }
+        Knob free;
+        reverie::ui::DivisionGrid synced;
     };
 
     void timerCallback() override;
@@ -64,8 +66,7 @@ private:
     void resetToInit();
     void tapTempo();
 
-    Knob* knob (Section&, const char* paramId, const char* caption);
-    void combo (Section&, const char* paramId, const char* caption, int width = 96);
+    Knob* knob (Section&, const char* paramId, const char* caption, Knob::Style style = Knob::rotary);
     void headerButton (Section&, const char* paramId, const char* caption, int width);
     reverie::ui::Readout* readout (Section&, const char* caption);
 
@@ -75,14 +76,15 @@ private:
     Content content;
 
     juce::OwnedArray<juce::Component> owned;
-    juce::OwnedArray<juce::AudioProcessorValueTreeState::ComboBoxAttachment> comboAttachments;
 
     Section input, delay, ducker, reverb, output;
     reverie::ui::MeterPanel meterPanel;
     reverie::ui::GuidePanel guidePanel;
     reverie::ui::TimelinePanel timelinePanel;
     TimeCell* timeCell = nullptr;
-    Knob *tempoKnob = nullptr, *characterKnob = nullptr;
+    Knob* characterKnob = nullptr;
+    reverie::ui::TempoField* tempoField = nullptr;
+    reverie::ui::ThresholdMeter* thresholdMeter = nullptr;
     reverie::ui::Readout *timeRead = nullptr, *peakRead = nullptr;
     std::unique_ptr<reverie::ui::ChoiceButtons> routeButtons;
     std::unique_ptr<reverie::ui::LedButton> bypassButton;

@@ -423,15 +423,66 @@ void ReverieProcessor::processEffects (float* l, float* r, const float* kl, cons
 //==============================================================================
 void ReverieProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    if (auto xml = apvts.copyState().createXml())
+    if (auto xml = stampedState().createXml())
         copyXmlToBinary (*xml, destData);
 }
 
 void ReverieProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
-        if (xml->hasTagName (apvts.state.getType()))
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        loadState (juce::ValueTree::fromXml (*xml));
+}
+
+juce::ValueTree ReverieProcessor::stampedState()
+{
+    auto tree = apvts.copyState();
+    tree.setProperty (stateVersionId, stateVersion, nullptr);
+    tree.setProperty ("pluginVersion", JucePlugin_VersionString, nullptr);     // for reading by eye only
+    return tree;
+}
+
+/** Brings a saved tree written by an older Reverie up to the current format, one version at a
+    time. Each step is a case that fixes up what changed in that version (a renamed id, a new
+    range, a choice list that grew), so a session from any earlier version loads as it sounded. */
+static void migrateState (juce::ValueTree& tree, int from)
+{
+    for (int v = from; v < ReverieProcessor::stateVersion; ++v)
+    {
+        switch (v)
+        {
+            // case 1: ... changes from version 1 to version 2 go here
+            default: break;
+        }
+    }
+    juce::ignoreUnused (tree);
+}
+
+bool ReverieProcessor::loadState (juce::ValueTree tree)
+{
+    if (! tree.isValid() || ! tree.hasType (apvts.state.getType()))
+        return false;
+
+    // States written before the version was recorded are version 1: the format has not changed since.
+    // A state from a newer Reverie is loaded as far as it can be: controls this version has are
+    // restored, anything it does not know about is ignored.
+    const int version = (int) tree.getProperty (stateVersionId, 1);
+    migrateState (tree, juce::jmin (version, stateVersion));
+
+    // A control the saved state does not mention goes to its default, rather than keeping whatever
+    // it was set to before the load, so a session or preset always sounds the same however it is opened.
+    for (auto* base : getParameters())
+        if (auto* param = dynamic_cast<juce::RangedAudioParameter*> (base))
+            if (! tree.getChildWithProperty ("id", param->paramID).isValid())
+            {
+                juce::ValueTree child ("PARAM");
+                child.setProperty ("id", param->paramID, nullptr);
+                child.setProperty ("value", param->convertFrom0to1 (param->getDefaultValue()), nullptr);
+                tree.appendChild (child, nullptr);
+            }
+
+    tree.setProperty (stateVersionId, stateVersion, nullptr);
+    apvts.replaceState (tree);
+    return true;
 }
 
 void ReverieProcessor::switchAB (int slot)

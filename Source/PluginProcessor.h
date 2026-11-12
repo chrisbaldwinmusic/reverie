@@ -39,6 +39,17 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    /** Version of the saved-state format. Raise it whenever a saved session or preset would load
+        differently (a parameter renamed, a range or choice list changed) and add a step to
+        migrateState in PluginProcessor.cpp that converts the previous version. */
+    static constexpr int stateVersion = 1;
+    static constexpr const char* stateVersionId = "stateVersion";
+
+    /** The settings as saved in sessions and presets, stamped with the format version. */
+    juce::ValueTree stampedState();
+    /** Restores settings saved by any version of Reverie. Returns false if the tree is not a Reverie state. */
+    bool loadState (juce::ValueTree tree);
+
     juce::UndoManager undo;
     juce::AudioProcessorValueTreeState apvts;
 

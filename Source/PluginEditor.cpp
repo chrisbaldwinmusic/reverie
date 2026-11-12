@@ -31,68 +31,170 @@ ReverieEditor::ReverieEditor (ReverieProcessor& p)
     content.addAndMakeVisible (guidePanel);
     content.addChildComponent (timelinePanel);
 
-    // ---- INPUT ----
-    knob (input, "inGain", "GAIN");
-    tempoKnob = knob (input, "bpm", "TEMPO");
-    knob (input, "feedLo", "FEED LOW CUT");
-    knob (input, "feedHi", "FEED HIGH CUT");
-    tapButton.setClickingTogglesState (false);
-    tapButton.onClick = [this] { tapTempo(); };
-    setHelpId (tapButton, "tap");
-    input.addHeader (&tapButton, 40);
+    // Each module's controls are shaped by their job: a switch for a choice, a large knob for the
+    // control that defines the sound, small knobs for fine-tuning, faders for levels, a drawn
+    // curve for filters.
+    auto segments = [this] (Section& s, const char* id, float textSize)
+    {
+        auto* c = new ChoiceButtons (apvts, id, s.accent);
+        c->setTextSize (textSize, 0.1f);
+        owned.add (c); s.addCell (c);
+        return c;
+    };
+    auto curve = [this] (Section& s, const char* lo, const char* hi, const char* caption)
+    {
+        auto* c = new FilterCurve (apvts, lo, hi, caption, s.accent);
+        owned.add (c); s.addCell (c);
+        return c;
+    };
+    auto column = [] (juce::Rectangle<int>& area, int width, int gapAfter = 6)
+    {
+        auto c = area.removeFromLeft (width);
+        area.removeFromLeft (gapAfter);
+        return c;
+    };
 
-    // ---- DELAY ----  (top row: the echo itself; bottom row: its character and tone)
-    delay.setPower (apvts, "dlyOn");
-    timeCell = new TimeCell (apvts, delay.accent);
-    owned.add (timeCell); delay.addCell (timeCell);
-    knob (delay, "dlyFb", "FEEDBACK");
-    knob (delay, "dlyOffset", "L/R OFFSET");
-    knob (delay, "dlyModRate", "MOD RATE");
-    knob (delay, "dlyModDepth", "MOD DEPTH");
-    knob (delay, "dlyLevel", "LEVEL");
-    combo (delay, "dlyType", "TYPE");
-    combo (delay, "dlyMode", "MODE");
-    knob (delay, "dlyChar", "CHARACTER");
-    knob (delay, "dlyLo", "LOW CUT");
-    knob (delay, "dlyHi", "HIGH CUT");
-    timeRead = readout (delay, "TIME ms");
-    setHelpId (*timeRead, "delay.ms");
-    headerButton (delay, "dlySync", "SYNC", 48);
+    // ---- INPUT ----
+    {
+        auto* gain = knob (input, "inGain", "GAIN");
+        tempoField = new TempoField (apvts, col::ivory);
+        owned.add (tempoField); input.addCell (tempoField);
+        auto* feed = curve (input, "feedLo", "feedHi", "FEED FILTERS");
+        tapButton.setClickingTogglesState (false);
+        tapButton.onClick = [this] { tapTempo(); };
+        setHelpId (tapButton, "tap");
+        input.addHeader (&tapButton, 40);
+
+        input.layoutBody = [=, this] (juce::Rectangle<int> b)
+        {
+            auto top = b.removeFromTop (112);
+            gain->setBounds (top.removeFromLeft (b.getWidth() / 2).reduced (8, 2));
+            tempoField->setBounds (top.withSizeKeepingCentre (top.getWidth(), 64));
+            b.removeFromTop (10);
+            feed->setBounds (b.withSizeKeepingCentre (b.getWidth(), juce::jmin (b.getHeight(), 128)));
+        };
+    }
+
+    // ---- DELAY ----
+    {
+        delay.setPower (apvts, "dlyOn");
+        auto* type = segments (delay, "dlyType", 11.5f);
+        auto* mode = segments (delay, "dlyMode", 11.5f);
+        timeCell = new TimeCell (apvts, delay.accent);
+        owned.add (timeCell); delay.addCell (timeCell);
+        timeRead = readout (delay, "TIME ms");
+        setHelpId (*timeRead, "delay.ms");
+        auto* fb      = knob (delay, "dlyFb", "FEEDBACK");
+        auto* rate    = knob (delay, "dlyModRate", "MOD RATE");
+        auto* depth   = knob (delay, "dlyModDepth", "MOD DEPTH");
+        auto* charK   = knob (delay, "dlyChar", "CHARACTER");
+        auto* offset  = knob (delay, "dlyOffset", "L/R OFFSET", Knob::bipolar);
+        auto* tone    = curve (delay, "dlyLo", "dlyHi", "REPEAT FILTERS");
+        headerButton (delay, "dlySync", "SYNC", 48);
+
+        delay.layoutBody = [=, this] (juce::Rectangle<int> b)
+        {
+            auto strip = b.removeFromTop (30);
+            type->setBounds (strip.removeFromLeft (juce::roundToInt ((float) strip.getWidth() * 0.6f)));
+            strip.removeFromLeft (12);
+            mode->setBounds (strip);
+            b.removeFromTop (10);
+
+            auto time = column (b, 170);
+            timeRead->setBounds (time.removeFromBottom (50));
+            timeCell->setBounds (time.reduced (0, 2));
+            fb->setBounds (column (b, 160).withSizeKeepingCentre (160, 180));
+            auto small1 = column (b, 92), small2 = column (b, 92, 10);
+            rate->setBounds (small1.removeFromTop (small1.getHeight() / 2).reduced (2));
+            depth->setBounds (small1.reduced (2));
+            charK->setBounds (small2.removeFromTop (small2.getHeight() / 2).reduced (2));
+            offset->setBounds (small2.reduced (2));
+            tone->setBounds (b.withSizeKeepingCentre (b.getWidth(), juce::jmin (b.getHeight(), 150)));
+        };
+    }
 
     // ---- DUCKER ----
-    ducker.setPower (apvts, "duckOn");
-    knob (ducker, "duckAmt", "AMOUNT");
-    knob (ducker, "duckThr", "THRESHOLD");
-    knob (ducker, "duckRel", "RELEASE");
-    combo (ducker, "duckTarget", "TARGET", 84);
-    headerButton (ducker, "duckExt", "EXT KEY", 62);
-    ducker.enableGrMeter (24.0f);
-
-    // ---- REVERB ----  (top row: the space; bottom row: its texture and tone)
-    reverb.setPower (apvts, "rvOn");
-    knob (reverb, "rvPre", "PRE-DELAY");
-    knob (reverb, "rvSize", "SIZE");
-    knob (reverb, "rvDecay", "DECAY");
-    knob (reverb, "rvDamp", "DAMPING");
-    knob (reverb, "rvMod", "MOD");
-    knob (reverb, "rvLevel", "LEVEL");
-    combo (reverb, "rvType", "TYPE");
-    characterKnob = knob (reverb, "rvChar", "EARLY");
-    knob (reverb, "rvDiff", "DIFFUSION");
-    knob (reverb, "rvLo", "LOW CUT");
-    knob (reverb, "rvHi", "HIGH CUT");
-    knob (reverb, "rvWidth", "WIDTH");
-    headerButton (reverb, "rvFreeze", "FREEZE", 60);
-
-    // ---- OUTPUT ----
-    knob (output, "mix", "MIX");
-    knob (output, "outGain", "TRIM");
     {
-        auto* cell = new CaptionCell (std::make_unique<LedButton> (apvts, "wetOnly", "SEND", col::ivory), "WET ONLY", 56, 26);
-        owned.add (cell); output.addCell (cell);
+        ducker.setPower (apvts, "duckOn");
+        auto* target = segments (ducker, "duckTarget", 10.0f);
+        thresholdMeter = new ThresholdMeter (apvts, ducker.accent);
+        owned.add (thresholdMeter); ducker.addCell (thresholdMeter);
+        auto* amount  = knob (ducker, "duckAmt", "AMOUNT");
+        auto* release = knob (ducker, "duckRel", "RELEASE");
+        headerButton (ducker, "duckExt", "EXT KEY", 62);
+        ducker.enableGrMeter (24.0f);
+
+        ducker.layoutBody = [=, this] (juce::Rectangle<int> b)
+        {
+            target->setBounds (b.removeFromTop (28));
+            b.removeFromTop (8);
+            thresholdMeter->setBounds (b.removeFromTop (54));
+            b.removeFromTop (4);
+            amount->setBounds (b.removeFromLeft (b.getWidth() / 2).reduced (4, 2));
+            release->setBounds (b.reduced (4, 2));
+        };
     }
-    peakRead = readout (output, "PEAK dBFS");
-    setHelpId (*peakRead, "meter.out");
+
+    // ---- REVERB ----
+    {
+        reverb.setPower (apvts, "rvOn");
+        auto* type = segments (reverb, "rvType", 11.5f);
+        auto* freeze = new LedButton (apvts, "rvFreeze", "FREEZE", reverb.accent);
+        owned.add (freeze); reverb.addCell (freeze);
+        auto* size   = knob (reverb, "rvSize", "SIZE");
+        auto* decay  = knob (reverb, "rvDecay", "DECAY");
+        auto* pre    = knob (reverb, "rvPre", "PRE-DELAY");
+        characterKnob = knob (reverb, "rvChar", "EARLY");
+        auto* diff   = knob (reverb, "rvDiff", "DIFFUSION");
+        auto* mod    = knob (reverb, "rvMod", "MOD");
+        auto* damp   = knob (reverb, "rvDamp", "DAMPING");
+        auto* width  = knob (reverb, "rvWidth", "WIDTH");
+        auto* tone   = curve (reverb, "rvLo", "rvHi", "TAIL FILTERS");
+        auto* charK  = characterKnob;
+
+        reverb.layoutBody = [=] (juce::Rectangle<int> b)
+        {
+            auto strip = b.removeFromTop (30);
+            freeze->setBounds (strip.removeFromRight (150));
+            strip.removeFromRight (12);
+            type->setBounds (strip);
+            b.removeFromTop (10);
+
+            size->setBounds (column (b, 140).withSizeKeepingCentre (140, 170));
+            decay->setBounds (column (b, 140, 10).withSizeKeepingCentre (140, 170));
+            for (auto pair : { std::pair<Knob*, Knob*> { pre, charK }, { diff, mod }, { damp, width } })
+            {
+                auto c = column (b, 84, pair.first == damp ? 10 : 6);
+                pair.first->setBounds (c.removeFromTop (c.getHeight() / 2).reduced (2));
+                pair.second->setBounds (c.reduced (2));
+            }
+            tone->setBounds (b.withSizeKeepingCentre (b.getWidth(), juce::jmin (b.getHeight(), 150)));
+        };
+    }
+
+    // ---- OUTPUT ----  (a small mixer: the two effect levels on faders, then the blend with the dry signal)
+    {
+        auto* dlyFader = knob (output, "dlyLevel", "DELAY", Knob::fader);
+        auto* rvFader  = knob (output, "rvLevel", "REVERB", Knob::fader);
+        dlyFader->slider.setColour (juce::Slider::thumbColourId, delay.accent);
+        rvFader->slider.setColour (juce::Slider::thumbColourId, reverb.accent);
+        auto* mix  = knob (output, "mix", "MIX");
+        auto* trim = knob (output, "outGain", "TRIM", Knob::bipolar);
+        peakRead = readout (output, "PEAK dBFS");
+        setHelpId (*peakRead, "meter.out");
+        headerButton (output, "wetOnly", "WET ONLY", 72);
+
+        output.layoutBody = [=, this] (juce::Rectangle<int> b)
+        {
+            auto faders = b.removeFromLeft (112);
+            dlyFader->setBounds (faders.removeFromLeft (56).reduced (2, 4));
+            rvFader->setBounds (faders.reduced (2, 4));
+            b.removeFromLeft (6);
+            mix->setBounds (b.removeFromTop (112).reduced (2));
+            peakRead->setBounds (b.removeFromBottom (50));
+            trim->setBounds (b.reduced (10, 2));
+        };
+    }
 
     // ---- header ----
     bypassButton = std::make_unique<LedButton> (apvts, "bypass", "BYPASS", col::red);
@@ -275,7 +377,7 @@ void ReverieEditor::savePreset()
         file = file.withFileExtension ("reverie");
 
         // a preset is the sound only: window and Guide choices stay with the session
-        auto tree = apvts.copyState();
+        auto tree = proc.stampedState();
         for (int i = tree.getNumProperties(); --i >= 0;)
             if (const auto name = tree.getPropertyName (i).toString(); name.startsWith ("ui_") || name.startsWith ("guide_"))
                 tree.removeProperty (tree.getPropertyName (i), nullptr);
@@ -298,23 +400,16 @@ void ReverieEditor::loadPreset (const juce::File& file)
         if (const auto name = apvts.state.getPropertyName (i); name.toString().startsWith ("ui_") || name.toString().startsWith ("guide_"))
             tree.setProperty (name, apvts.state.getProperty (name), nullptr);
 
-    apvts.replaceState (tree);
+    proc.loadState (tree);
 }
 
 //==============================================================================
-Knob* ReverieEditor::knob (Section& s, const char* paramId, const char* caption)
+Knob* ReverieEditor::knob (Section& s, const char* paramId, const char* caption, Knob::Style style)
 {
-    auto* k = new Knob (apvts, paramId, caption, s.accent);
+    auto* k = new Knob (apvts, paramId, caption, s.accent, style);
     owned.add (k);
     s.addCell (k);
     return k;
-}
-
-void ReverieEditor::combo (Section& s, const char* paramId, const char* caption, int width)
-{
-    auto* cell = new CaptionCell (makeCombo (apvts, paramId, comboAttachments), caption, width, 24);
-    owned.add (cell);
-    s.addCell (cell);
 }
 
 void ReverieEditor::headerButton (Section& s, const char* paramId, const char* caption, int width)
@@ -502,8 +597,13 @@ void ReverieEditor::timerCallback()
     timeRead->set (msL < 100.0f ? juce::String (msL, 1) : juce::String (juce::roundToInt (msL)));
 
     const float hostBpm = m.hostBpm.load (std::memory_order_relaxed);
-    tempoKnob->setAlpha (hostBpm > 1.0f ? 0.35f : 1.0f);        // the host's tempo wins when there is one
+    tempoField->setHostBpm (hostBpm);                            // the host's tempo wins when there is one
     tapButton.setAlpha (hostBpm > 1.0f ? 0.35f : 1.0f);
+
+    // the threshold is set against whatever drives the ducker: the key when it is in use, otherwise the dry signal
+    const bool keyed = raw ("duckExt") > 0.5f && m.keyConnected.load (std::memory_order_relaxed);
+    thresholdMeter->setKeyed (keyed);
+    thresholdMeter->setLevel (keyed ? keyHold : juce::jmax (inHold[0], inHold[1]));
 
     if (const int type = (int) raw ("rvType"); type != reverbType)
     {

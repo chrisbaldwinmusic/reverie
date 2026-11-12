@@ -317,7 +317,9 @@ int main (int argc, char** argv)
         };
         const float dig = brightness (0), tape = brightness (1), analog = brightness (2);
         std::cout << "  top end of repeat 4 against repeat 1: Digital " << dig << " dB, Tape " << tape << " dB, Analog " << analog << " dB" << std::endl;
-        check (std::abs (dig) < 1.0f && tape < -3.0f && analog < -3.0f, "Tape and Analog repeats darken as they go round; Digital ones do not");
+        // The bucket brigade's steep anti-aliasing filters already band-limit the first repeat, so later passes
+        // darken it by less than tape does; the per-stage charge loss still makes each one clearly duller.
+        check (std::abs (dig) < 1.0f && tape < -3.0f && analog < dig - 1.5f, "Tape and Analog repeats darken as they go round; Digital ones do not");
     }
 
     if (want ("Reverb decay time"))
@@ -646,6 +648,153 @@ int main (int argc, char** argv)
         const float a = p.apvts.getRawParameterValue ("rvDecay")->load();
         p.switchAB (1);
         check (std::abs (a - 1.0f) < 0.01f && std::abs (p.apvts.getRawParameterValue ("rvDecay")->load() - 4.0f) < 0.01f, "A/B keeps two separate settings");
+    }
+
+    if (want ("State versions"))
+    {
+        auto value = [] (ReverieProcessor& p, const char* id) { return p.apvts.getRawParameterValue (id)->load(); };
+        auto load = [] (ReverieProcessor& p, const juce::ValueTree& tree)
+        {
+            juce::MemoryBlock block;
+            p.copyXmlToBinary (*tree.createXml(), block);
+            p.setStateInformation (block.getData(), (int) block.getSize());
+        };
+
+        ReverieProcessor p;
+        prepare (p);
+        setParam (p, "rvDecay", 7.0f); setParam (p, "dlyFb", 60.0f);
+        juce::MemoryBlock block;
+        p.getStateInformation (block);
+        const auto saved = juce::ValueTree::fromXml (*p.getXmlFromBinary (block.getData(), (int) block.getSize()));
+        check ((int) saved.getProperty (ReverieProcessor::stateVersionId, 0) == ReverieProcessor::stateVersion,
+               "saved state records its format version");
+
+        // a state written before a control existed: the control goes to its default, not to whatever was set before
+        auto old = saved.createCopy();
+        old.removeProperty (ReverieProcessor::stateVersionId, nullptr);
+        old.removeChild (old.getChildWithProperty ("id", "rvWidth"), nullptr);
+        setParam (p, "rvWidth", 30.0f);
+        load (p, old);
+        check (std::abs (value (p, "rvWidth") - 100.0f) < 0.01f && std::abs (value (p, "rvDecay") - 7.0f) < 0.01f,
+               "an older state without a control loads it at its default, and the rest as saved");
+
+        // a state from a later version, with a control this version does not have
+        auto newer = saved.createCopy();
+        newer.setProperty (ReverieProcessor::stateVersionId, ReverieProcessor::stateVersion + 5, nullptr);
+        juce::ValueTree extra ("PARAM");
+        extra.setProperty ("id", "fromTheFuture", nullptr).setProperty ("value", 1.0f, nullptr);
+        newer.appendChild (extra, nullptr);
+        resetParams (p);
+        load (p, newer);
+        check (std::abs (value (p, "rvDecay") - 7.0f) < 0.01f && std::abs (value (p, "dlyFb") - 60.0f) < 0.01f,
+               "a state from a newer version loads the controls this version knows");
+
+        // out-of-range values are held to the control's range
+        auto wild = saved.createCopy();
+        wild.getChildWithProperty ("id", "dlyFb").setProperty ("value", 5000.0f, nullptr);
+        load (p, wild);
+        check (value (p, "dlyFb") <= 110.0f, "an out-of-range value is held to the control's range");
+
+        // something that is not a Reverie state changes nothing
+        setParam (p, "rvDecay", 3.0f);
+        const char junk[] = "not a plug-in state";
+        p.setStateInformation (junk, (int) sizeof (junk));
+        juce::ValueTree other ("SOMETHING_ELSE");
+        load (p, other);
+        p.setStateInformation (nullptr, 0);
+        check (std::abs (value (p, "rvDecay") - 3.0f) < 0.01f, "data that is not a Reverie state is ignored");
+    }
+
+    if (want ("Analog bucket brigade"))
+    {
+        auto analog = [] (ReverieProcessor& p, float ms, float character)
+        {
+            cleanDelay (p);
+            setParam (p, "dlyType", 2.0f); setParam (p, "dlyTime", ms); setParam (p, "dlyChar", character);
+        };
+
+        // the clock runs within the chips' range at 300 ms, is held at its fastest at 20 ms and at its slowest at 1.5 s
+        for (float ms : { 20.0f, 300.0f, 1500.0f })
+        {
+            ReverieProcessor p;
+            prepare (p);
+            analog (p, ms, 0.0f);
+            auto in = noise (2, (int) sr * 4, -20.0f, 21);
+            auto out = in;
+            run (p, out, 512);
+            const int expected = juce::roundToInt (ms * 0.001 * sr);
+            int best = 0; double bestC = -1.0;
+            for (int lag = expected - 40; lag <= expected + 40; ++lag)
+            {
+                double c = 0.0;
+                for (int i = (int) sr * 2; i < (int) sr * 3; ++i) c += (double) in.getSample (0, i - lag) * out.getSample (0, i);
+                if (c > bestC) { bestC = c; best = lag; }
+            }
+            std::cout << "  " << ms << " ms: echo arrives " << best - expected << " samples from the time set" << std::endl;
+            check (std::abs (best - expected) <= 1, "Analog echo at " + juce::String (ms, 0) + " ms lands on the time set, filters and all");
+        }
+
+        // the compander restores the level it took away
+        for (float level : { -40.0f, -25.0f, -10.0f })
+        {
+            ReverieProcessor p;
+            prepare (p);
+            analog (p, 250.0f, 0.0f);
+            auto b = sine (2, (int) sr * 3, 500.0, level);
+            run (p, b, 512);
+            const float got = rmsDb (b, (int) sr * 2, (int) sr * 3) + 3.01f;
+            std::cout << "  500 Hz at " << level << " dBFS: echo at " << got << " dBFS" << std::endl;
+            check (std::abs (got - level) < 1.0f, "the compander gives back the level it took, at " + juce::String (level, 0) + " dBFS");
+        }
+
+        // bandwidth: the anti-aliasing and reconstruction filters set the top end, and the expander doubles their slope
+        {
+            auto echoDb = [&] (double freq)
+            {
+                ReverieProcessor p;
+                prepare (p);
+                analog (p, 250.0f, 0.0f);
+                auto b = sine (2, (int) sr * 3, freq, -20.0f);
+                run (p, b, 512);
+                return rmsDb (b, (int) sr * 2, (int) sr * 3) + 3.01f + 20.0f;
+            };
+            const float mid = echoDb (2000.0), top = echoDb (12000.0);
+            std::cout << "  echo level against the input: 2 kHz " << mid << " dB, 12 kHz " << top << " dB" << std::endl;
+            check (std::abs (mid) < 1.0f && top < -30.0f, "Analog passes 2 kHz and removes 12 kHz");
+        }
+
+        // a change of sample rate redesigns the filters, even when Character has not moved
+        {
+            auto render = [&] (ReverieProcessor& p, double rate)
+            {
+                prepare (p, 2, rate, 512);
+                juce::AudioBuffer<float> b (2, (int) rate * 3);
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < b.getNumSamples(); ++i)
+                        b.setSample (ch, i, juce::Decibels::decibelsToGain (-20.0f) * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 2000.0 * i / rate));
+                run (p, b, 512);
+                return rmsDb (b, (int) rate * 2, (int) rate * 3);
+            };
+            ReverieProcessor moved, fresh;
+            analog (moved, 250.0f, 40.0f);      // Character at its default, where the redesign used to be skipped
+            analog (fresh, 250.0f, 40.0f);
+            render (moved, 48000.0);
+            const float after = render (moved, 96000.0), direct = render (fresh, 96000.0);
+            std::cout << "  2 kHz echo at 96 kHz: after a change from 48 kHz " << after << " dB, prepared at 96 kHz " << direct << " dB" << std::endl;
+            check (std::abs (after - direct) < 0.1f, "after a sample-rate change Analog sounds as if it had started at the new rate");
+        }
+
+        // hiss: the expander pulls the chips' noise down when nothing is playing
+        {
+            ReverieProcessor p;
+            prepare (p);
+            analog (p, 300.0f, 100.0f);
+            auto b = noise (2, (int) sr * 4, -12.0f, 4, (int) sr);
+            run (p, b, 512);
+            const float floor = rmsDb (b, (int) sr * 3, (int) sr * 4);
+            std::cout << "  hiss after the echoes have gone, at full Character: " << floor << " dBFS" << std::endl;
+            check (floor < -95.0f, "between phrases the hiss is pulled down out of hearing");
+        }
     }
 
     if (want ("Interface snapshots"))

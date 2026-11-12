@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Common.h"
+#include "BucketBrigade.h"
 
 namespace reverie
 {
@@ -83,6 +84,7 @@ struct Echo
         sr = sampleRate;
         maxDelay = (float) (sr * 4.0);
         for (auto& l : line) l.prepare ((int) (sr * 8.1));     // reverse playback reaches back twice the delay time
+        for (auto& b : bbd) b.prepare (sr, 4.1);
         glide = 1.0f - (float) std::exp (-1.0 / (0.06 * sr));
         reset();
     }
@@ -90,7 +92,8 @@ struct Echo
     void reset() noexcept
     {
         for (auto& l : line) l.reset();
-        hp.reset(); lp.reset(); bump.reset(); tone1.reset(); tone2.reset();
+        for (auto& b : bbd) b.reset();
+        hp.reset(); lp.reset(); bump.reset(); tone1.reset();
         primed = false;
         lfoPhase = wowPhase = flutterPhase = 0.0;
         revPhase[0] = 0.0f; revPhase[1] = 0.25f;
@@ -117,9 +120,7 @@ struct Echo
         }
         else if (p.type == analog)
         {
-            tone1.setCutoff (sr, 7500.0 - 5000.0 * c);
-            tone2.setCutoff (sr, 9000.0 - 5000.0 * c);
-            drive = 1.0f + 2.0f * c;
+            for (auto& b : bbd) b.setCharacter (c);
         }
         else if (p.type == lofi)
         {
@@ -176,8 +177,19 @@ struct Echo
                     modL = modSamples * (float) std::sin (lfoPhase) + wobble;
                     modR = modSamples * (float) std::cos (lfoPhase) + wobble;
                 }
-                y[0] = line[0].read (std::clamp (time[0] + std::min (modL, 0.45f * time[0]), 2.0f, maxDelay));
-                y[1] = line[1].read (std::clamp (time[1] + std::min (modR, 0.45f * time[1]), 2.0f, maxDelay));
+                const float d0 = std::clamp (time[0] + std::min (modL, 0.45f * time[0]), 2.0f, maxDelay);
+                const float d1 = std::clamp (time[1] + std::min (modR, 0.45f * time[1]), 2.0f, maxDelay);
+                if (p.type == analog)
+                {
+                    // the chips' clock follows the delay time, so modulation bends the pitch as on the pedal
+                    y[0] = bbd[0].read (d0 - bbd[0].latencySamples (d0));
+                    y[1] = bbd[1].read (d1 - bbd[1].latencySamples (d1));
+                }
+                else
+                {
+                    y[0] = line[0].read (d0);
+                    y[1] = line[1].read (d1);
+                }
             }
 
             for (int ch = 0; ch < 2; ++ch)
@@ -189,12 +201,6 @@ struct Echo
                         v = tone1.lp (ch, bump.process (ch, v));
                         v = std::tanh (drive * v) / drive;
                         break;
-                    case analog:
-                    {
-                        const float u = drive * tone2.lp (ch, tone1.lp (ch, v));
-                        v = (u >= 0.0f ? std::tanh (u) : u / (1.0f - 0.6f * u)) / drive;
-                        break;
-                    }
                     case lofi:
                         holdCount[ch] += 1.0f;
                         if (holdCount[ch] >= holdLen) { holdCount[ch] -= holdLen; held[ch] = std::round (v * quant) / quant; }
@@ -209,12 +215,15 @@ struct Echo
             const float fl = softLimit (fb * y[0]), fr = softLimit (fb * y[1]);
             fbPeak = std::max (fbPeak, std::max (std::abs (fb * y[0]), std::abs (fb * y[1])));
 
+            float in0, in1;
             switch (p.mode)
             {
-                case pingPong:  line[0].push (0.5f * (l + r) + fr); line[1].push (fl); break;
-                case cross:     line[0].push (l + fr);              line[1].push (r + fl); break;
-                default:        line[0].push (l + fl);              line[1].push (r + fr); break;
+                case pingPong:  in0 = 0.5f * (l + r) + fr; in1 = fl;     break;
+                case cross:     in0 = l + fr;              in1 = r + fl; break;
+                default:        in0 = l + fl;              in1 = r + fr; break;
             }
+            if (p.type == analog) { bbd[0].write (in0); bbd[1].write (in1); }
+            else                  { line[0].push (in0); line[1].push (in1); }
 
             outL[i] = y[0];
             outR[i] = y[1];
@@ -231,8 +240,9 @@ private:
     double sr = 48000.0;
     float maxDelay = 192000.0f, glide = 0.001f;
     DelayLine line[2];
+    BucketBrigade bbd[2];
     Biquad hp, lp, bump;
-    OnePole tone1, tone2;
+    OnePole tone1;
     bool primed = false;
     float time[2] { 1000.0f, 1000.0f };
     double lfoPhase = 0.0, wowPhase = 0.0, flutterPhase = 0.0, lfoInc = 0.0;
