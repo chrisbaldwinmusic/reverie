@@ -1,3 +1,5 @@
+> **This repository has moved.** Reverie is now developed in the Channel Audio monorepo, [chrisbaldwinmusic/channelaudio](https://github.com/chrisbaldwinmusic/channelaudio), in the `Reverie/` folder, with its full history. This repository is archived and kept for reference only.
+
 # Reverie
 
 A boutique delay and reverb plugin: one unit that covers slapback to shimmer. AU, VST3 and Standalone, built with JUCE. A sibling of Atelier, the channel strip, and built the same way.
